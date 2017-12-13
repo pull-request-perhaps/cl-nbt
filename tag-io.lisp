@@ -72,7 +72,7 @@
                  '("BlockLight" "SkyLight" "Add" "Data")
 	         :test #'string=)
 	 (let* ((len (read-si4 stream))
-		(nibbles (make-array (* 2 len))))
+		(nibbles (make-array (* 2 len) :element-type '(unsigned-byte 4))))
 	   (loop
 	      for i below len
 	      for j = (* 2 i)
@@ -84,13 +84,13 @@
 	   (setf (payload tag) nibbles)))
 	((string= (name tag) "Blocks")
 	 (let* ((len (read-si4 stream))
-                (arr (make-array len)))
+                (arr (make-array len :element-type '(unsigned-byte 32))))
            (dotimes (i len)
              (setf (aref arr i) (read-unsigned-int stream 1)))
            (setf (payload tag) arr)))
 	(t
 	 (let* ((len (read-si4 stream))
-                (arr (make-array len)))
+                (arr (make-array len :element-type '(unsigned-byte 8))))
            (dotimes (i len)
              (setf (aref arr i) (read-si1 stream)))
            (setf (payload tag) arr))))
@@ -129,7 +129,7 @@
 
 (defmethod read-payload (stream (tag tag-int-array))
   (let* ((len (read-si4 stream))
-         (arr (make-array len)))
+         (arr (make-array len :element-type '(signed-byte 32))))
     (dotimes (i len)
       (setf (aref arr i) (read-si4 stream)))
     (setf (payload tag) arr))
@@ -200,7 +200,7 @@
   (cond ((member (name tag)
 		 '("BlockLight" "SkyLight" "Add" "Data")
 		 :test #'string=)
-	 (let ((octets (make-array 2048)))
+	 (let ((octets (make-array 2048 :element-type '(unsigned-byte 8))))
 	   (loop
 	      for i below 4096 by 2
 	      for j below 2048
