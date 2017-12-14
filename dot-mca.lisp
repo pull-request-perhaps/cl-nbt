@@ -9,8 +9,6 @@
   ((offsets :initarg :offsets :accessor offsets)
    (sector-counts :initarg :sector-counts :accessor sector-counts)
    (timestamps :initarg :timestamps :accessor timestamps)
-;;   (len-chunk-data :initarg :len-chunk-data :accessor len-chunk-data)
-;;   (compression-type :initarg :compression-type :accessor compression-type)
    (chunks :initarg :chunks :accessor chunks))
   (:default-initargs
     :offsets (make-array +total-chunks+ :initial-element 0)
@@ -61,8 +59,7 @@
     (write-mca-payload out rgn)))
 
 (defun write-mca-header (stream rgn)
-  (with-slots (offsets sector-counts timestamps
-		       len-chunk-data compression-type) rgn
+  (with-slots (offsets sector-counts timestamps) rgn
     (loop
        for offset across offsets
        and sector-count across sector-counts
@@ -71,6 +68,19 @@
     (loop
        for timestamp across timestamps
        do (write-si4 stream timestamp))))
+
+(defun write-mca-payload (stream rgn)
+  (with-slots (offsets sector-counts chunks) rgn
+    (dotimes (i +total-chunks+)
+      (let ((chunk (aref chunks i)))
+	(when (typep chunk 'nbt-tag)
+	  (dump-ith-chunk stream
+			  i
+			  (salza2:compress-data
+			   (tag-to-octets (aref chunks 0 ;i
+						))
+			   'salza2:zlib-compressor)
+			  rgn))))))
 
 (defun round-up-to-page (n)
   (* +page-size+ (ceiling n +page-size+)))
@@ -84,56 +94,88 @@
     (loop repeat (padcount pos)
        do (write-byte 0 stream))))
 
-(defun write-mca-payload (stream rgn)
-  (with-slots (offsets sector-counts chunks) rgn
-    (loop
-       for i below +total-chunks+
-       and chunk across chunks
-       and offset across offsets
-       and sector-count across sector-counts
-       do (when (typep chunk 'nbt-tag)
-	    (let* ((data (salza2:compress-data
-			  (tag-to-octets chunk)
-			  'salza2:zlib-compressor))
-		   (data-size (length data))
-		   (ceil (ceiling (+
-				   1 ;;compression type
-				   4 ;;chunk length in bytes
-				   data-size ;;compressed data
-				   )
-				  +page-size+)))
-	      (pad-to-page stream)
-	      
-	      ;; Go back and edit sector-count value in header (if necessary)
-	      (when (not (= sector-count ceil))
-		(let ((prev-pos (file-position stream)))
-		  (file-position stream (+ 3 (* i 4)))
-		  (write-si1 stream ceil)
-		  (file-position stream prev-pos)))
-
-	      ;;go back and edit the offset
+(defun dump-ith-chunk (stream i data region)
+  (with-slots (offsets sector-counts chunks) region
+    (let ((offset (aref offsets i))
+	  (sector-count (aref sector-counts i)))
+      (let* ((data-size (length data))
+	     (new-sector-count (ceiling (+
+					 1 ;;compression type
+					 4 ;;chunk length in bytes
+					 data-size ;;compressed data
+					 )
+					+page-size+)))   
+	(if (= sector-count
+	       new-sector-count)
+	    ;;write it in the same place, same size as before
+	    (file-position stream (* +page-size+ offset))
+	    ;; Go back and edit sector-count value in header (if necessary)
+	    (progn
+	      (setf (aref sector-counts i) new-sector-count)
 	      (let ((prev-pos (file-position stream)))
-		(let ((kb-offset (floor prev-pos +page-size+)))
-		  (when (not (= offset kb-offset))
+		(file-position stream (+ 3 (* i 4)))
+		(write-si1 stream new-sector-count)
+		(file-position stream prev-pos))
+	      
+	      (let ((kb-offset (find-space (intervals region i) new-sector-count)))
+		;;go back and edit the offset		    
+		(unless (= offset kb-offset)
+		  (setf (aref offsets i) kb-offset)
+		  (let ((prev-pos (file-position stream)))
 		    (file-position stream (* i 4))
 		    (write-si3 stream kb-offset)
-		    (file-position stream prev-pos))))
+		    (file-position stream prev-pos)))
+		;;go to new area
+		(file-position stream (* kb-offset +page-size+)))))
 
-	      (progn
-		(write-si4 stream (1+ data-size))
-		(write-si1 stream
+	;;start of data
+	(progn
+	  (write-si4 stream (1+ data-size))
+	  (write-si1 stream
 					;1;;gzip
-			   2;;zlib
-			   ))
-	      ;; Write compressed chunk data
-	      (write-sequence data stream)
+		     2;;zlib
+		     ))
+	;; Write compressed chunk data
+	(write-sequence data stream)
 
-	      ;; Pad up to end of entry
-	      (pad-to-page stream))))
+	(pad-to-page stream)))))
 
-    ;; Add padding so file length is a multiple of 4096
-    (pad-to-page stream)))
+(defun intervals (rgn &optional (exclude -1))
+  (with-slots (offsets sector-counts) rgn
+    (let (acc)
+      (loop
+	 for i below +total-chunks+
+	 and offset across offsets
+	 and sector-count across sector-counts
+	 do (when (not (and (zerop offset) (zerop sector-count)))
+	      (unless (= i exclude)
+		(push (cons offset (+ offset sector-count)) acc))))
+      (sort acc #'< :key #'first))))
 
+(defun find-space (intervals size)
+  (let ((last 2)
+	(bailout (1+ +total-chunks+)) ;;in case of error
+	)
+    (flet ((next-cell ()
+	     (if intervals
+		 (pop intervals)
+		 (load-time-value (cons most-positive-fixnum
+					"end")))))
+      (block later
+	(tagbody
+	 again
+	   (destructuring-bind (a . b) (next-cell)
+	     (if (>= (- a last) size)
+		 (return-from later last)
+		 (progn
+		   (setf last b)
+		   (when (zerop (decf bailout))
+		     (error "chunks screwed up"))
+		   (go again)))))))))
+
+
+
+#+nil
 (set-pprint-dispatch
  `(vector * 1024)
  nil
