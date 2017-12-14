@@ -72,9 +72,16 @@
        for timestamp across timestamps
        do (write-si4 stream timestamp))))
 
+(defun round-up-to-page (n)
+  (* +page-size+ (ceiling n +page-size+)))
+
+(defun padcount (n)
+  (- (round-up-to-page n)
+     n))
+
 (defun pad-to-page (stream)
   (let ((pos (file-position stream)))
-    (loop repeat (- +page-size+ (mod pos +page-size+))
+    (loop repeat (padcount pos)
        do (write-byte 0 stream))))
 
 (defun write-mca-payload (stream rgn)
@@ -85,30 +92,35 @@
        and offset across offsets
        and sector-count across sector-counts
        do (when (typep chunk 'nbt-tag)
-	    (let* ((data (salza2:compress-data (tag-to-octets chunk)
-					       'salza2:zlib-compressor))
+	    (let* ((data (salza2:compress-data
+			  (tag-to-octets chunk)
+			  'salza2:zlib-compressor))
 		   (data-size (length data))
-		   (ceil (ceiling data-size +page-size+)))
+		   (ceil (ceiling (+
+				   1 ;;compression type
+				   4 ;;chunk length in bytes
+				   data-size ;;compressed data
+				   )
+				  +page-size+)))
 	      (pad-to-page stream)
 	      
 	      ;; Go back and edit sector-count value in header (if necessary)
 	      (when (not (= sector-count ceil))
-		(setf sector-count ceil)
 		(let ((prev-pos (file-position stream)))
 		  (file-position stream (+ 3 (* i 4)))
-		  (write-si1 stream sector-count)
+		  (write-si1 stream ceil)
 		  (file-position stream prev-pos)))
 
 	      ;;go back and edit the offset
 	      (let ((prev-pos (file-position stream)))
-		(let ((kb-offset (ash prev-pos -12)))
+		(let ((kb-offset (floor prev-pos +page-size+)))
 		  (when (not (= offset kb-offset))
 		    (file-position stream (* i 4))
 		    (write-si3 stream kb-offset)
 		    (file-position stream prev-pos))))
 
 	      (progn
-		(write-si4 stream data-size)
+		(write-si4 stream (1+ data-size))
 		(write-si1 stream
 					;1;;gzip
 			   2;;zlib
@@ -124,6 +136,8 @@
 
 (set-pprint-dispatch
  `(vector * 1024)
+ nil
+ #+nil
  (lambda (stream obj)
    (dotimes (x 32)
      (terpri stream)

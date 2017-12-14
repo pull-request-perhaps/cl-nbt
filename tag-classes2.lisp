@@ -56,3 +56,38 @@
                        x
                        (rec (cdr targets) (payload x) x))))))
     (rec targets (payload root))))
+
+(defun compare-tags (tag1 tag2 &optional name-acc)
+  (if (and (typep tag1 'nbt-tag)
+	   (typep tag1 'nbt-tag))
+      (progn
+	(push (list (name tag1) (name tag2)) name-acc)
+	(typecase tag1
+	  (tag-compound
+	   (loop
+	      for a in (payload tag1)
+	      for b in (payload tag2) do
+		(compare-tags a b name-acc)))
+	  (tag-list
+	   (let ((p1 (payload tag1))
+		 (p2 (payload tag2)))
+	     (typecase p1
+	       (cons  (if (typep p2 'cons)
+			  (loop
+			     for a in p1
+			     for b in p2 do
+			       (compare-tags a b name-acc))
+			  (print (list 'list name-acc p1 p2))))
+	       (otherwise
+		(compare-tags (payload tag1)
+			      (payload tag2)
+			      name-acc)))))
+	  (otherwise
+	   (compare-tags (payload tag1)
+			 (payload tag2)
+			 name-acc))))
+      (unless (equalp tag1 tag2)
+	(print (list
+		name-acc
+		(type-of tag1)
+		(type-of tag2))))))

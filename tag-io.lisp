@@ -50,50 +50,14 @@
   (setf (payload tag) (read-f8 stream))
   tag)
 
-;; Simple version (not compatible with .mca files)
 
-#|
 (defmethod read-payload (stream (tag tag-byte-array))
   (let* ((len (read-si4 stream))
-         (arr (make-array len))) ;specify element type?
+         (arr (make-array len :element-type '(unsigned-byte 8))))
+					;specify element type?
     (dotimes (i len)
-      (setf (aref arr i) (read-si1 stream)))
+      (setf (aref arr i) (read-unsigned-int stream 1)))
     (setf (payload tag) arr))
-  tag)
-|#
-
-;; See the anomaly in the region file spec:
-;; https://minecraft.gamepedia.com/Chunk_format#Block_format
-
-;; The "Blocks" case and the catch-all are almost identical. Refactor?
-
-(defmethod read-payload (stream (tag tag-byte-array))
-  (cond ((member (name tag)
-                 '("BlockLight" "SkyLight" "Add" "Data")
-	         :test #'string=)
-	 (let* ((len (read-si4 stream))
-		(nibbles (make-array (* 2 len) :element-type '(unsigned-byte 4))))
-	   (loop
-	      for i below len
-	      for j = (* 2 i)
-	      for octet = (read-unsigned-int stream 1)
-	      do (setf (aref nibbles j)
-		       (logand #b00001111 octet)
-		       (aref nibbles (1+ j))
-		       (ash (logand #b11110000 octet) -4)))
-	   (setf (payload tag) nibbles)))
-	((string= (name tag) "Blocks")
-	 (let* ((len (read-si4 stream))
-                (arr (make-array len :element-type '(unsigned-byte 32))))
-           (dotimes (i len)
-             (setf (aref arr i) (read-unsigned-int stream 1)))
-           (setf (payload tag) arr)))
-	(t
-	 (let* ((len (read-si4 stream))
-                (arr (make-array len :element-type '(unsigned-byte 8))))
-           (dotimes (i len)
-             (setf (aref arr i) (read-si1 stream)))
-           (setf (payload tag) arr))))
   tag)
 
 (defmethod read-payload (stream (tag tag-string))
@@ -188,30 +152,12 @@
 
 ;; Simple version (not compatible with .mca files)
 
-#|
-(defmethod write-payload (stream (tag tag-byte-array))
-  (write-si4 stream (length (payload tag)))
-  (write-sequence (payload tag) stream))
-|#
-
-;; See comment above tag-byte-array's read-payload method
 
 (defmethod write-payload (stream (tag tag-byte-array))
-  (cond ((member (name tag)
-		 '("BlockLight" "SkyLight" "Add" "Data")
-		 :test #'string=)
-	 (let ((octets (make-array 2048 :element-type '(unsigned-byte 8))))
-	   (loop
-	      for i below 4096 by 2
-	      for j below 2048
-	      do (setf (aref octets j)
-		       (+ (aref (payload tag) i)
-			  (ash (aref (payload tag) (1+ i)) 4))))
-	   (write-si4 stream 2048)
-	   (write-sequence octets stream)))
-	(t
-	 (write-si4 stream (length (payload tag)))
-	 (write-sequence (payload tag) stream))))
+  (let ((payload (payload tag)))
+    (write-si4 stream (length payload))
+    (write-sequence payload stream)))
+
 
 (defmethod write-payload (stream (tag tag-string))
   (write-si2 stream
@@ -261,3 +207,59 @@
 			   :element-type '(unsigned-byte 8))))
       (read-sequence seq temp)
       seq)))
+
+;; See the anomaly in the region file spec:
+;; https://minecraft.gamepedia.com/Chunk_format#Block_format
+
+;; The "Blocks" case and the catch-all are almost identical. Refactor?
+#+nil
+(defmethod read-payload (stream (tag tag-byte-array))
+  (cond ((member (name tag)
+                 '("BlockLight" "SkyLight" "Add" "Data")
+	         :test #'string=)
+	 (let* ((len (read-si4 stream))
+		(nibbles (make-array (* 2 len) :element-type '(unsigned-byte 4))))
+	   (loop
+	      for i below len
+	      for j = (* 2 i)
+	      for octet = (read-unsigned-int stream 1)
+	      do (setf (aref nibbles j)
+		       (logand #b00001111 octet)
+		       (aref nibbles (1+ j))
+		       (ash (logand #b11110000 octet) -4)))
+	   (setf (payload tag) nibbles)))
+	((string= (name tag) "Blocks")
+	 (let* ((len (read-si4 stream))
+                (arr (make-array len :element-type '(unsigned-byte 8))))
+           (dotimes (i len)
+             (setf (aref arr i) (read-unsigned-int stream 1)))
+           (setf (payload tag) arr)))
+	(t
+	 (let* ((len (read-si4 stream))
+                (arr (make-array len :element-type '(signed-byte 8))))
+           (dotimes (i len)
+             (setf (aref arr i) (read-si1 stream)))
+           (setf (payload tag) arr))))
+  tag)
+
+
+;; See comment above tag-byte-array's read-payload method
+
+#+nil
+(defmethod write-payload (stream (tag tag-byte-array))
+  (progn (write-si4 stream (length (payload tag)))
+		(write-sequence (payload tag) stream))
+  (cond ((member (name tag)
+		 '("BlockLight" "SkyLight" "Add" "Data")
+		 :test #'string=)
+	 (let ((octets (make-array 2048 :element-type '(unsigned-byte 8))))
+	   (loop
+	      for i below 4096 by 2
+	      for j below 2048
+	      do (setf (aref octets j)
+		       (+ (aref (payload tag) i)
+			  (ash (aref (payload tag) (1+ i)) 4))))
+	   (write-si4 stream 2048)
+	   (write-sequence octets stream)))
+	(t
+	 )))
