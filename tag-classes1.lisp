@@ -17,10 +17,12 @@
   (mapcar #'cons tagtypes (loop for x upto 11 collect x)))
 
 (defun tagtype->id (tagtype)
-  (cdr (assoc tagtype tagtypes->ids)))
+  (or (cdr (assoc tagtype tagtypes->ids))
+      (error "no id for tagtype ~a" tagtype)))
 
 (defun id->tagtype (id)
-  (car (rassoc id tagtypes->ids)))
+  (or (car (rassoc id tagtypes->ids))
+      (error "no tagtype for id ~a" id)))
 
 (defun deftagclass (classname)
   `(defclass ,classname (nbt-tag)

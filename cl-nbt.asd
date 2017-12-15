@@ -9,7 +9,8 @@
                #:babel
                #:chipz
                #:salza2
-               #:cl-fad)
+               #:cl-fad
+	       #:trivial-garbage)
   :serial t
   :components ((:file "package")
                (:file "tag-classes1")
