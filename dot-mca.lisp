@@ -260,40 +260,22 @@
 		  
 		  (data handle)))
 
-(defparameter *region*
-  nil)
 
-(defun atest ()
-  (let ((handle (open-handle "/home/imac/.minecraft/saves/dogeworld/region/r.0.0.mcr")))
-    (setf *region* handle)
-    (test6)
-    #+nil
-    (dotimes (x 64)
-      (dotimes (z 64)
-	(dotimes (y 64)
-	  (setblock (cond ((evenp y) 1)
-			  ((evenp x) 2)
-			  ((evenp z) 3)
-			  (t 4))
-		    x y z))))
-    (map nil
-	 (lambda (x)
-	   (when x
-	     (recalculate-heights x)))
-	 (slot-value (data *region*) 'chunks))
-    (print (flushall handle))
-    (close-handle handle)))
-(defun test ()
-  (map nil
-       (lambda (x)
-	 (when x
-	   (let ((y (payload (get-tag x "Level" "Blocks"
-				      ))))
-	     (map-into y (lambda (x)
-			   (if (= 1 x) 0 x))
-		       y))))
-       (slot-value (data *region*) 'chunks)))
+(defun set-chunk (new-tag x z region)
+  (setf (aref (slot-value (data region)
+			  'chunks)
+	      (pos-intra-chunkid x z))
+	new-tag))
 
+;;;;mcr block array
+(defun array-lookup (x y z)
+  (+ y
+     (* 128 (mod z 16))
+     (* 128 16 (mod x 16))))
+;;mcr heightmap array
+(defun heightmap-lookup (x z)
+  (+ (mod x 16)
+     (* 16 (mod z 16))))
 
 (defun mag (id name payload)
   (let ((inst
@@ -323,127 +305,3 @@
 		   )
 	      (mag 9 "TileEntities" 1)
 	      (mag 9 "Entities" 1))))))
-
-(defun set-chunk (new-tag x z region)
-  (setf (aref (slot-value (data region)
-			  'chunks)
-	      (pos-intra-chunkid x z))
-	new-tag))
-
-(defun chunk-mcr (x z)
-  (values (floor x 32)
-	  (floor z 32)))
-(defun pos-chunk (x z)
-  (values (floor x 16)
-	  (floor z 16)))
-
-(defun getblock (x y z)
-  (setf y (mod y 128))
-  (multiple-value-bind (chunkx chunkz) (pos-chunk x z)
-    (let ((chunks (slot-value (data *region*) 'chunks)))
-      (let ((intraid (pos-intra-chunkid chunkx chunkz)))
-	(let ((chunk (aref chunks intraid)))
-	  (unless chunk
-	    (setf chunk (new-mcr-chunk chunkx chunkz))
-	    (set-chunk chunk chunkx chunkz *region*))
-	  (let ((data
-		 (payload (get-tag chunk "Level" "Blocks"))))
-	    (aref data (array-lookup x y z))))))))
-
-(defun array-lookup (x y z)
-  (+ y
-     (* 128 (mod z 16))
-     (* 128 16 (mod x 16))))
-
-(defun recalculate-heights (chunk)
-  (let ((height (payload (get-tag chunk "Level" "HeightMap")))
-	(blocks (payload (get-tag chunk "Level" "Blocks"))))
-    (dotimes (x 16)
-      (dotimes (z 16)
-	(setheigt (getheight x z blocks) x z height)))))
-
-(defun getheight (x z array)
-  (let ((num 0))
-    (loop for y from 127 downto 0 do
-	 (unless (zerop (aref array (array-lookup x y z)))
-	   (setf num (min 127 (1+ y)))
-	   (return)))
-    num))
-
-(defun setheigt (value x z data)
-  (setf 
-   (aref data (+ (mod x 16)
-		 (* 16 (mod z 16))))
-   value))
-
-(defun setblock (value x y z)
-  (setf y (mod y 128))
-  (multiple-value-bind (chunkx chunkz) ;;chunk coordinates
-      (pos-chunk x z)
-    (let ((chunks (slot-value (data *region*) 'chunks)))
-      (let ((intraid (pos-intra-chunkid chunkx chunkz)))
-	(let ((chunk (aref chunks intraid)))
-	  (unless chunk
-	    (setf chunk (new-mcr-chunk chunkx chunkz))
-	    (set-chunk chunk chunkx chunkz *region*))
-	  (let ((data
-		 (payload (get-tag chunk "Level" "Blocks"))))
-	    (setf (aref data (array-lookup x y z))
-		  value)))))))
-(defun setlight (value x y z)
-  (setf y (mod y 128))
-  (multiple-value-bind (chunkx chunkz) ;;chunk coordinates
-      (pos-chunk x z)
-    (let ((chunks (slot-value (data *region*) 'chunks)))
-      (let ((intraid (pos-intra-chunkid chunkx chunkz)))
-	(let ((chunk (aref chunks intraid)))
-	  (unless chunk
-	    (setf chunk (new-mcr-chunk chunkx chunkz))
-	    (set-chunk chunk chunkx chunkz *region*))
-	  (let ((data
-		 (payload (get-tag chunk "Level" "BlockLight")))
-		(place (array-lookup x y z)))
-	    (let ((place2 (ash place -1)))
-	      (let ((old (aref data place2)))
-		(setf (aref data place2)
-		      (if (oddp place)
-			  (dpb value (byte 4 4) old)
-			  (dpb value (byte 4 0) old)))))))))))
-(defun setskylight (value x y z)
-  (setf y (mod y 128))
-  (multiple-value-bind (chunkx chunkz) ;;chunk coordinates
-      (pos-chunk x z)
-    (let ((chunks (slot-value (data *region*) 'chunks)))
-      (let ((intraid (pos-intra-chunkid chunkx chunkz)))
-	(let ((chunk (aref chunks intraid)))
-	  (unless chunk
-	    (setf chunk (new-mcr-chunk chunkx chunkz))
-	    (set-chunk chunk chunkx chunkz *region*))
-	  (let ((data
-		 (payload (get-tag chunk "Level" "SkyLight")))
-		(place (array-lookup x y z)))
-	    (let ((place2 (ash place -1)))
-	      (let ((old (aref data place2)))
-		(setf (aref data place2)
-		      (if (oddp place)
-			  (dpb value (byte 4 4) old)
-			  (dpb value (byte 4 0) old)))))))))))
-
-
-(defun test6 ()
-  (atest::map-all-chunks
-   (lambda (x y z)
-     (let ((bid (world::getblock x y z))
-	   (bid1 (world::getlight x y z))
-	   (bid2 (world::skygetlight x y z)))
-       (setblock bid x y (+ 128 z))
-       (setlight bid1 x y (+ 128 z))
-       (setskylight bid2 x y (+ 128 z))))))
-(defun test3 ()
-  (dotimes (x 2)
-    (dotimes (y 2)
-      #+nil
-      (or
-       (load-chunk x y *region*))
-      (set-chunk (new-mcr-chunk x y) x y *region*)
-      )))
